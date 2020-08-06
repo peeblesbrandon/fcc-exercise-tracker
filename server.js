@@ -23,14 +23,11 @@ app.get('/', (req, res) => {
 
 // POST new user
 app.post('/api/exercise/new-user', (req, res) => {
-  console.log(req.headers);
-  console.log(req);
   const newUser = new User({
     username: req.body.username
   });
   newUser.save()
     .then(result => {
-      console.log(result);
       res.status(201).json(result);
     })
     .catch(err => {
@@ -42,7 +39,6 @@ app.post('/api/exercise/new-user', (req, res) => {
 
 // GET all users
 app.get('/api/exercise/users', (req, res) => {
-  console.log(req.headers);
   User.find({}, (err, docs) => {      // empty search params should return all documents
     if (err) {
       res.status(500).json({error: err});
@@ -54,6 +50,11 @@ app.get('/api/exercise/users', (req, res) => {
 
 // POST new exercise
 app.post('/api/exercise/add', (req, res) => {
+  // check that all necessary fields were provided before proceeding
+  if (!req.body.userId || !req.body.description || !req.body.duration) {
+    res.status(400).json({ error: 'Must provide userId, duration, and description.'});
+  }
+  
   // validate that user exists and return error if not
   User.findById(req.body.userId, (err, user) => {
     if (err) {  // server error
@@ -63,19 +64,41 @@ app.post('/api/exercise/add', (req, res) => {
       if (user == null) {
         res.status(403).json({error: 'Unknown userId'});
       }
+      
+      // make duration a number
+      req.body.duration = Number(req.body.duration);
+      if (isNaN(req.body.duration)) { 
+        res.status(400).json({ error: 'Duration must be a number' });
+      }
+      
+      // create the date
+      if (!req.body.date) {
+        req.body.date = new Date(); // current date if not provided
+      } else {
+        req.body.date = new Date(req.body.date);
+        if (!isValidDate(req.body.date)) {
+          throw res.status(400).json({error: 'Invalid date input(s)'});
+        }
+      }
+      req.body.date = req.body.date.toDateString();
+      
       // create the new exercise
       const newExercise = new Exercise({
         userId: req.body.userId,
         description: req.body.description,
         duration: req.body.duration,
-        date: req.body.date ? req.body.date : undefined // send undefined if no date provided ('' aka null)
+        date: req.body.date
       });
       // save to db
-      console.log(newExercise);
       newExercise.save()
         .then(result => {
-          console.log(result);
-          res.status(201).json(result);
+          res.status(201).json({
+            _id: user._id,
+            username: user.username,
+            date: result.date.toDateString(),
+            duration: parseInt(result.duration),
+            description: result.description
+          });
         })
         .catch(err => {
           res.status(500).json({error: err});
@@ -97,11 +120,11 @@ app.use((req, res, next) => {
   req.query.limit = parseInt(req.query.limit);
   req.query.from = req.query.from ? new Date(req.query.from) : undefined;  //
   req.query.to = req.query.to ? new Date(req.query.to) : undefined;
-  console.log(req.query);
+
   // catch date errors IFF dates were actually provided (e.g. not undefined)
   if ((!isValidDate(req.query.from) && req.query.from != undefined) 
       || (!isValidDate(req.query.to) && req.query.to != undefined)) {
-    throw res.status(500).json({error: 'Invalid date input(s)'});
+    throw res.status(400).json({error: 'Invalid date input(s)'});
   }
   
   next();
@@ -140,7 +163,7 @@ app.get('/api/exercise/log', (req, res) => {
 
 // Not found middleware
 app.use((req, res, next) => {
-  return next({status: 404, message: 'not found'})
+  res.json({status: 404, message: 'not found'})
 });
 
 // Error Handling middleware
